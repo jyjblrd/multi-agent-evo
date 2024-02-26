@@ -80,7 +80,7 @@ def associate_trajectories(
     :return: traj_1, traj_2 (synchronized)
     """
     if not isinstance(traj_1, PoseTrajectory3D) \
-        or not isinstance(traj_2, PoseTrajectory3D):
+            or not isinstance(traj_2, PoseTrajectory3D):
         raise SyncException("trajectories must be PoseTrajectory3D objects")
 
     snd_longer = len(traj_2.timestamps) > len(traj_1.timestamps)

@@ -106,6 +106,7 @@ setup(
         "pyyaml",
         "pillow",
         "rosbags>=0.9.10",
+        "networkx",
     ],
     python_requires=">=3.8",
     classifiers=[

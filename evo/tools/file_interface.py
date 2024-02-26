@@ -30,6 +30,7 @@ import zipfile
 from pathlib import Path
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 from rosbags.rosbag1 import (Reader as Rosbag1Reader, Writer as Rosbag1Writer)
 from rosbags.rosbag2 import (Reader as Rosbag2Reader, Writer as Rosbag2Writer)
 from rosbags.serde import deserialize_cdr, ros1_to_cdr, serialize_cdr
@@ -42,6 +43,7 @@ from evo.core import result
 from evo.core.trajectory import PosePath3D, PoseTrajectory3D
 from evo.tools import user, tf_id
 from evo.tools._typing import PathStr, PathStrHandle
+from evo.tools.coordinate_frames_decoder import CoordinateFrameDecoder
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +263,7 @@ def get_supported_topics(
 
 def read_bag_trajectory(reader: typing.Union[Rosbag1Reader,
                                              Rosbag2Reader], topic: str,
-                        cache_tf_tree: bool = False) -> PoseTrajectory3D:
+                        transform_to_root_tf_frame_id: str = None, use_final_tf_state: bool = False) -> PoseTrajectory3D:
     """
     :param reader: opened bag reader (rosbags.rosbag2 or rosbags.rosbag1)
     :param topic: trajectory topic of supported message type,
@@ -269,6 +271,7 @@ def read_bag_trajectory(reader: typing.Union[Rosbag1Reader,
     :param cache_tf_tree: cache the tf tree. This speeds up the trajectory
                   reading in case multiple TF trajectories are loaded from
                   the same reader.
+    :param transform_to_tf_frame_id: TODO
     :return: trajectory.PoseTrajectory3D
     """
     if not isinstance(reader, (Rosbag1Reader, Rosbag2Reader)):
@@ -276,18 +279,6 @@ def read_bag_trajectory(reader: typing.Union[Rosbag1Reader,
             "reader must be a rosbags.rosbags1.reader.Reader "
             "or rosbags.rosbags2.reader.Reader - "
             "rosbag.Bag() is not supported by evo anymore")
-
-    # TODO: Support TF also with ROS2 bags.
-    if tf_id.check_id(topic):
-        if isinstance(reader, Rosbag1Reader):
-            # Use TfCache instead if it's a TF transform ID.
-            from evo.tools import tf_cache
-            tf_tree_cache = (tf_cache.instance(reader.__hash__())
-                             if cache_tf_tree else tf_cache.TfCache())
-            return tf_tree_cache.get_trajectory(reader, identifier=topic)
-        else:
-            raise FileInterfaceException(
-                "TF support for ROS2 bags is not implemented")
 
     if topic not in reader.topics:
         raise FileInterfaceException("no messages for topic '" + topic +
@@ -313,6 +304,10 @@ def read_bag_trajectory(reader: typing.Union[Rosbag1Reader,
     stamps, xyz, quat = [], [], []
 
     connections = [c for c in reader.connections if c.topic == topic]
+
+    if transform_to_root_tf_frame_id is not None:
+        coordinate_frame_decoder = CoordinateFrameDecoder(reader)
+
     for connection, _, rawdata in reader.messages(
             connections=connections):  # type: ignore
         if isinstance(reader, Rosbag1Reader):
@@ -325,6 +320,23 @@ def read_bag_trajectory(reader: typing.Union[Rosbag1Reader,
         t = msg.header.stamp
         stamps.append(t.sec + (t.nanosec * 1e-9))
         xyz_t, quat_t = get_xyz_quat(msg)
+
+        if transform_to_root_tf_frame_id is not None:
+            if use_final_tf_state:
+                transformation = coordinate_frame_decoder.get_transformation(
+                    transform_to_root_tf_frame_id, msg.header.frame_id)
+            else:
+                timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+                transformation = coordinate_frame_decoder.get_transformation(
+                    transform_to_root_tf_frame_id, msg.header.frame_id, timestamp)
+
+            xyz_t_homogenous = np.append(xyz_t, 1)
+            xyz_t_homogenous = transformation @ xyz_t_homogenous
+            xyz_t = (xyz_t_homogenous[:3] / xyz_t_homogenous[3]).tolist()
+
+            quat_t = lie.multiply_quaternion(
+                quat_t, Rotation.from_matrix(transformation[:3, :3]).as_quat())
+
         xyz.append(xyz_t)
         quat.append(quat_t)
 
@@ -332,7 +344,8 @@ def read_bag_trajectory(reader: typing.Union[Rosbag1Reader,
         len(stamps), msg_type, topic))
 
     # yapf: disable
-    (connection, _, rawdata) = list(reader.messages(connections=connections))[0]  # type: ignore
+    (connection, _, rawdata) = list(reader.messages(
+        connections=connections))[0]  # type: ignore
     # yapf: enable
     if isinstance(reader, Rosbag1Reader):
         first_msg = deserialize_cdr(ros1_to_cdr(rawdata, connection.msgtype),

@@ -250,3 +250,13 @@ def random_se3() -> np.ndarray:
     r = random_so3()
     t = tr.random_vector(3)
     return se3(r, t)
+
+def multiply_quaternion(q1: list[float], q2: list[float]):
+    a, b, c, d = q1
+    e, f, g, h = q2
+    return [
+        a * e - b * f - c * g - d * h,
+        a * f + b * e + c * h - d * g,
+        a * g - b * e + c * e + d * f,
+        a * h + b * g - c * f + d * e
+    ]

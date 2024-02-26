@@ -53,6 +53,7 @@ class PosePath3D(object):
     just a path, no temporal information
     also: base class for real trajectory
     """
+
     def __init__(
             self, positions_xyz: typing.Optional[np.ndarray] = None,
             orientations_quat_wxyz: typing.Optional[np.ndarray] = None,
@@ -373,6 +374,7 @@ class PoseTrajectory3D(PosePath3D, object):
     """
     a PosePath with temporal information
     """
+
     def __init__(
             self, positions_xyz: typing.Optional[np.ndarray] = None,
             orientations_quat_wxyz: typing.Optional[np.ndarray] = None,
@@ -569,3 +571,44 @@ def merge(trajectories: typing.Sequence[PoseTrajectory3D]) -> PoseTrajectory3D:
     merged_xyz = merged_xyz[order]
     merged_quat = merged_quat[order]
     return PoseTrajectory3D(merged_xyz, merged_quat, merged_stamps)
+
+
+def align_multiple(source_pose_paths: list[PosePath3D], target_pose_paths: list[PosePath3D], correct_scale: bool = False, correct_only_scale: bool = False) -> geometry.UmeyamaResult:
+    """
+    align to a reference trajectory using Umeyama alignment
+    :param source_pose_paths: estimate trajectory (edited in place)
+    :param target_pose_paths: reference trajectory
+    :param correct_scale: set to True to adjust also the scale
+    :param correct_only_scale: set to True to correct the scale, but not the pose
+    :return: the result parameters of the Umeyama algorithm
+    """
+    with_scale = correct_scale or correct_only_scale
+    if correct_only_scale:
+        logger.debug("Correcting scale...")
+    else:
+        logger.debug("Aligning using Umeyama's method..." +
+                     (" (with scale correction)" if with_scale else ""))
+
+    source_pose_path = np.hstack(
+        [pose_path.positions_xyz.T for pose_path in source_pose_paths])
+    target_pose_path = np.hstack(
+        [pose_path.positions_xyz.T for pose_path in target_pose_paths])
+
+    r_a, t_a, s = geometry.umeyama_alignment(
+        source_pose_path, target_pose_path, with_scale)
+
+    if not correct_only_scale:
+        logger.debug("Rotation of alignment:\n{}"
+                     "\nTranslation of alignment:\n{}".format(r_a, t_a))
+    logger.debug("Scale correction: {}".format(s))
+
+    for pose_path in source_pose_paths:
+        if correct_only_scale:
+            pose_path.scale(s)
+        elif correct_scale:
+            pose_path.scale(s)
+            pose_path.transform(lie.se3(r_a, t_a))
+        else:
+            pose_path.transform(lie.se3(r_a, t_a))
+
+    return [r_a, t_a, s]
