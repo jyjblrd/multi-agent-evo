@@ -48,6 +48,16 @@ class Plane(Enum):
     YZ = "yz"
 
 
+class PosePath3DElement(typing.TypedDict):
+    orientation_quat_wxyz: np.ndarray
+    pose_se3: np.ndarray
+    coord_frame: str
+
+
+class PoseTrajectory3DElement(PosePath3DElement):
+    timestamp: float
+
+
 class PosePath3D(object):
     """
     just a path, no temporal information
@@ -58,7 +68,8 @@ class PosePath3D(object):
             self, positions_xyz: typing.Optional[np.ndarray] = None,
             orientations_quat_wxyz: typing.Optional[np.ndarray] = None,
             poses_se3: typing.Optional[typing.Sequence[np.ndarray]] = None,
-            meta: typing.Optional[dict] = None):
+            meta: typing.Optional[dict] = None,
+            coord_frames: typing.Optional[np.ndarray] = None):
         """
         :param positions_xyz: nx3 list of x,y,z positions
         :param orientations_quat_wxyz: nx4 list of quaternions (w,x,y,z format)
@@ -79,6 +90,8 @@ class PosePath3D(object):
             raise TrajectoryException("pose data is empty")
         self.meta = {} if meta is None else meta
         self._projected = False
+        if coord_frames is not None:
+            self._coord_frames = coord_frames
 
     def __str__(self) -> str:
         return "{} poses, {:.3f}m path length".format(self.num_poses,
@@ -110,6 +123,17 @@ class PosePath3D(object):
             assert hasattr(self, "_poses_se3")
             self._positions_xyz = np.array([p[:3, 3] for p in self._poses_se3])
         return self._positions_xyz
+
+    @property
+    def num_poses(self) -> int:
+        if hasattr(self, "_poses_se3"):
+            return len(self._poses_se3)
+        else:
+            return self.positions_xyz.shape[0]
+
+    @property
+    def coord_frames(self) -> np.ndarray:
+        return self._coord_frames
 
     @property
     def distances(self) -> np.ndarray:
@@ -369,6 +393,25 @@ class PosePath3D(object):
             return {}
         return {}  # no idea yet
 
+    def filter(self, filter_func: typing.Callable[[PosePath3DElement], bool]) -> None:
+        mask = np.zeros(self.num_poses, dtype=bool)
+
+        for i in range(0, self.num_poses):
+            element: PosePath3DElement = {
+                "orientation_quat_wxyz": self.orientations_quat_wxyz[i] if self.orientations_quat_wxyz is not None else None,
+                "pose_se3": self.poses_se3[i] if self.poses_se3 is not None else None,
+                "coord_frame": self.coord_frames[i] if self.coord_frames is not None else None
+            }
+
+            mask[i] = filter_func(element)
+
+        self._positions_xyz = self._positions_xyz[mask] if self._positions_xyz is not None else None
+        self._orientations_quat_wxyz = self._orientations_quat_wxyz[
+            mask] if self._orientations_quat_wxyz is not None else None
+        self._poses_se3 = [item for item, mask_value in zip(
+            self._poses_se3, mask) if mask_value] if self._poses_se3 is not None else None
+        self._coord_frames = self._coord_frames[mask] if self._coord_frames is not None else None
+
 
 class PoseTrajectory3D(PosePath3D, object):
     """
@@ -380,13 +423,14 @@ class PoseTrajectory3D(PosePath3D, object):
             orientations_quat_wxyz: typing.Optional[np.ndarray] = None,
             timestamps: typing.Optional[np.ndarray] = None,
             poses_se3: typing.Optional[typing.Sequence[np.ndarray]] = None,
-            meta: typing.Optional[dict] = None):
+            meta: typing.Optional[dict] = None,
+            coord_frames: typing.Optional[np.ndarray] = None):
         """
         :param timestamps: optional nx1 list of timestamps
         """
         super(PoseTrajectory3D,
               self).__init__(positions_xyz, orientations_quat_wxyz, poses_se3,
-                             meta)
+                             meta, coord_frames)
         # this is a bit ugly...
         if timestamps is None:
             raise TrajectoryException("no timestamps provided")
@@ -501,6 +545,27 @@ class PoseTrajectory3D(PosePath3D, object):
         })
         return stats
 
+    def filter(self, filter_func: typing.Callable[[PoseTrajectory3DElement], bool]) -> None:
+        mask = np.zeros(self.num_poses, dtype=bool)
+
+        for i in range(0, self.num_poses):
+            element: PoseTrajectory3DElement = {
+                "timestamp": self.timestamps[i] if self.timestamps is not None else None,
+                "orientation_quat_wxyz": self.orientations_quat_wxyz[i] if self.orientations_quat_wxyz is not None else None,
+                "pose_se3": self.poses_se3[i] if self.poses_se3 is not None else None,
+                "coord_frame": self.coord_frames[i] if self.coord_frames is not None else None
+            }
+
+            mask[i] = filter_func(element)
+
+        self.timestamps = self.timestamps[mask] if self.timestamps is not None else None
+        self._positions_xyz = self._positions_xyz[mask] if self._positions_xyz is not None else None
+        self._orientations_quat_wxyz = self._orientations_quat_wxyz[
+            mask] if self._orientations_quat_wxyz is not None else None
+        self._poses_se3 = [item for item, mask_value in zip(
+            self._poses_se3, mask) if mask_value] if self._poses_se3 is not None else None
+        self._coord_frames = self._coord_frames[mask] if self._coord_frames is not None else None
+
 
 class Trajectory(PoseTrajectory3D):
     pass  # TODO compat
@@ -566,11 +631,14 @@ def merge(trajectories: typing.Sequence[PoseTrajectory3D]) -> PoseTrajectory3D:
     merged_xyz = np.concatenate([t.positions_xyz for t in trajectories])
     merged_quat = np.concatenate(
         [t.orientations_quat_wxyz for t in trajectories])
+    merged_coord_frames = np.concatenate(
+        [t.coord_frames for t in trajectories])
     order = merged_stamps.argsort()
     merged_stamps = merged_stamps[order]
     merged_xyz = merged_xyz[order]
     merged_quat = merged_quat[order]
-    return PoseTrajectory3D(merged_xyz, merged_quat, merged_stamps)
+    merged_coord_frames = merged_coord_frames[order]
+    return PoseTrajectory3D(merged_xyz, merged_quat, merged_stamps, coord_frames=merged_coord_frames)
 
 
 def align_multiple(source_pose_paths: list[PosePath3D], target_pose_paths: list[PosePath3D], correct_scale: bool = False, correct_only_scale: bool = False) -> geometry.UmeyamaResult:

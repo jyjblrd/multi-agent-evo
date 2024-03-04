@@ -301,7 +301,7 @@ def read_bag_trajectory(reader: typing.Union[Rosbag1Reader,
     else:
         get_xyz_quat = _get_xyz_quat_from_pose_or_odometry_msg
 
-    stamps, xyz, quat = [], [], []
+    stamps, xyz, quat, coord_frame = [], [], [], []
 
     connections = [c for c in reader.connections if c.topic == topic]
 
@@ -339,6 +339,7 @@ def read_bag_trajectory(reader: typing.Union[Rosbag1Reader,
 
         xyz.append(xyz_t)
         quat.append(quat_t)
+        coord_frame.append(msg.header.frame_id)
 
     logger.debug("Loaded {} {} messages of topic: {}".format(
         len(stamps), msg_type, topic))
@@ -354,7 +355,7 @@ def read_bag_trajectory(reader: typing.Union[Rosbag1Reader,
         first_msg = deserialize_cdr(rawdata, connection.msgtype)
     frame_id = first_msg.header.frame_id
     return PoseTrajectory3D(np.array(xyz), np.array(quat), np.array(stamps),
-                            meta={"frame_id": frame_id})
+                            meta={"frame_id": frame_id}, coord_frames=np.array(coord_frame))
 
 
 def write_bag_trajectory(writer, traj: PoseTrajectory3D, topic_name: str,
