@@ -27,7 +27,8 @@ import numpy as np
 import networkx as nx
 from rosbags.rosbag1 import Reader as Rosbag1Reader
 from rosbags.rosbag2 import Reader as Rosbag2Reader
-from rosbags.serde.serdes import deserialize_cdr, ros1_to_cdr
+from rosbags.serde import deserialize_cdr, ros1_to_cdr, serialize_cdr
+# from rosbags.serde.serdes import deserialize_cdr, ros1_to_cdr
 from scipy.spatial.transform import Rotation
 
 
@@ -36,7 +37,8 @@ from evo.tools.settings import SETTINGS
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_TRANSFORM_MSG = "interfaces/msg/Sim3TransformStamped"
+SUPPORTED_TRANSFORM_MSGS = [
+    "interfaces/msg/Sim3TransformStamped", "tf2_msgs/msg/TFMessage"]
 
 
 class CoordinateFrameCacheException(EvoException):
@@ -61,9 +63,9 @@ class CoordinateFrameDecoder(object):
 
         for connection, _, rawdata in reader.messages(
                 connections=connections):
-            if connection.msgtype != SUPPORTED_TRANSFORM_MSG:
+            if connection.msgtype not in SUPPORTED_TRANSFORM_MSGS:
                 raise CoordinateFrameCacheException(
-                    f"Expected {SUPPORTED_TRANSFORM_MSG} message type for topic "
+                    f"Expected {SUPPORTED_TRANSFORM_MSGS} message type for topic "
                     f"{topic}, got: {connection.msgtype}")
 
             if isinstance(reader, Rosbag1Reader):
@@ -72,18 +74,35 @@ class CoordinateFrameDecoder(object):
             else:
                 msg = deserialize_cdr(rawdata, connection.msgtype)
 
-            transformation_matrix = sim3_msg_to_matrix(msg.transform)
+            if connection.msgtype == "interfaces/msg/Sim3TransformStamped":
+                transformation_matrix = sim3_msg_to_matrix(msg.transform)
 
-            if msg.child_frame_id not in self.coord_frames:
-                self.coord_frames[msg.child_frame_id] = []
-                self.coord_frames_graph.add_edge(
-                    msg.header.frame_id, msg.child_frame_id
+                if msg.child_frame_id not in self.coord_frames:
+                    self.coord_frames[msg.child_frame_id] = []
+                    self.coord_frames_graph.add_edge(
+                        msg.header.frame_id, msg.child_frame_id
+                    )
+
+                timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+                self.coord_frames[msg.child_frame_id].append(
+                    (timestamp, transformation_matrix)
                 )
+            if connection.msgtype == "tf2_msgs/msg/TFMessage":
+                for transformStamped in msg.transforms:
+                    transformation_matrix = se3_msg_to_matrix(
+                        transformStamped.transform)
 
-            timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-            self.coord_frames[msg.child_frame_id].append(
-                (timestamp, transformation_matrix)
-            )
+                    if transformStamped.child_frame_id not in self.coord_frames:
+                        self.coord_frames[transformStamped.child_frame_id] = []
+                        self.coord_frames_graph.add_edge(
+                            transformStamped.header.frame_id, transformStamped.child_frame_id
+                        )
+
+                    timestamp = transformStamped.header.stamp.sec + \
+                        transformStamped.header.stamp.nanosec * 1e-9
+                    self.coord_frames[transformStamped.child_frame_id].append(
+                        (timestamp, transformation_matrix)
+                    )
 
         if next(nx.simple_cycles(self.coord_frames_graph), None) is not None:
             raise CoordinateFrameCacheException(
@@ -150,6 +169,30 @@ def sim3_msg_to_matrix(sim3_transform) -> np.ndarray:
     # Create the 4x4 transformation matrix
     transform_matrix = np.eye(4)
     transform_matrix[:3, :3] = rotation_scale_matrix
+    transform_matrix[:3, 3] = [
+        sim3_transform.translation.x,
+        sim3_transform.translation.y,
+        sim3_transform.translation.z
+    ]
+
+    return transform_matrix
+
+
+def se3_msg_to_matrix(sim3_transform) -> np.ndarray:
+    """
+    Convert a SE3Transform to a 4x4 matrix
+    """
+    quaternion = Rotation.from_quat([
+        sim3_transform.rotation.x,
+        sim3_transform.rotation.y,
+        sim3_transform.rotation.z,
+        sim3_transform.rotation.w
+    ])
+    rotation_matrix = quaternion.as_matrix()
+
+    # Create the 4x4 transformation matrix
+    transform_matrix = np.eye(4)
+    transform_matrix[:3, :3] = rotation_matrix
     transform_matrix[:3, 3] = [
         sim3_transform.translation.x,
         sim3_transform.translation.y,

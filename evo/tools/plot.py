@@ -300,21 +300,21 @@ def prepare_axis(fig: Figure, plot_mode: PlotMode = PlotMode.xy,
     else:
         ax = fig.add_subplot(subplot_arg)
     if plot_mode in {PlotMode.xy, PlotMode.xz, PlotMode.xyz}:
-        xlabel = f"$x$ ({length_unit.value})"
+        xlabel = f"$X$ [{length_unit.value}]"
     elif plot_mode in {PlotMode.yz, PlotMode.yx}:
-        xlabel = f"$y$ ({length_unit.value})"
+        xlabel = f"$Y$ [{length_unit.value}]"
     else:
-        xlabel = f"$z$ ({length_unit.value})"
+        xlabel = f"$Z$ [{length_unit.value}]"
     if plot_mode in {PlotMode.xy, PlotMode.zy, PlotMode.xyz}:
-        ylabel = f"$y$ ({length_unit.value})"
+        ylabel = f"$Y$ [{length_unit.value}]"
     elif plot_mode in {PlotMode.zx, PlotMode.yx}:
-        ylabel = f"$x$ ({length_unit.value})"
+        ylabel = f"$X$ [{length_unit.value}]"
     else:
-        ylabel = f"$z$ ({length_unit.value})"
+        ylabel = f"$Z$ [{length_unit.value}]"
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     if plot_mode == PlotMode.xyz and isinstance(ax, Axes3D):
-        ax.set_zlabel(f'$z$ ({length_unit.value})')
+        ax.set_zlabel(f'$Z$ [{length_unit.value}]')
     if SETTINGS.plot_invert_xaxis:
         plt.gca().invert_xaxis()
     if SETTINGS.plot_invert_yaxis:
@@ -443,7 +443,9 @@ def traj_colormap(ax: Axes, traj: trajectory.PosePath3D, array: ListOrArray,
                   plot_mode: PlotMode, min_map: float, max_map: float,
                   title: str = "",
                   fig: typing.Optional[mpl.figure.Figure] = None,
-                  plot_start_end_markers: bool = False) -> None:
+                  plot_start_end_markers: bool = False,
+                  color_bar_label: str = None,
+                  show_color_bar: bool = True) -> None:
     """
     color map a path/trajectory in xyz coordinates according to
     an array of values
@@ -471,7 +473,7 @@ def traj_colormap(ax: Axes, traj: trajectory.PosePath3D, array: ListOrArray,
     ax.autoscale_view(True, True, True)
     if plot_mode == PlotMode.xyz and isinstance(ax, Axes3D):
         min_z = np.amin(traj.positions_xyz[:, 2])
-        max_z = np.amax(traj.positions_xyz[:, 2])                
+        max_z = np.amax(traj.positions_xyz[:, 2])
         # Only adjust limits if there are z values to suppress mpl warning.
         if min_z != max_z:
             ax.set_zlim(min_z, max_z)
@@ -479,14 +481,19 @@ def traj_colormap(ax: Axes, traj: trajectory.PosePath3D, array: ListOrArray,
         set_aspect_equal(ax)
     if fig is None:
         fig = plt.gcf()
-    cbar = fig.colorbar(
-        mapper, ticks=[min_map, (max_map - (max_map - min_map) / 2), max_map],
-        ax=ax)
-    cbar.ax.set_yticklabels([
-        "{0:0.3f}".format(min_map),
-        "{0:0.3f}".format(max_map - (max_map - min_map) / 2),
-        "{0:0.3f}".format(max_map)
-    ])
+    if show_color_bar:
+        cbar = fig.colorbar(
+            mapper, ticks=[
+                min_map, (max_map - (max_map - min_map) / 2), max_map],
+            ax=ax, pad=0.05)
+        cbar.ax.set_yticklabels([
+            "{0:0.3f}".format(min_map),
+            "{0:0.3f}".format(max_map - (max_map - min_map) / 2),
+            "{0:0.3f}".format(max_map)
+        ])
+        if color_bar_label is not None:
+            cbar.set_label(color_bar_label)
+
     if title:
         ax.legend(frameon=True)
         ax.set_title(title)
@@ -650,11 +657,11 @@ def traj_rpy(axarr: np.ndarray, traj: trajectory.PosePath3D, style: str = '-',
 
 
 def trajectories(fig: Figure, trajectories: typing.Union[
-        trajectory.PosePath3D, typing.Sequence[trajectory.PosePath3D],
-        typing.Dict[str, trajectory.PosePath3D]], plot_mode=PlotMode.xy,
-                 title: str = "", subplot_arg: int = 111,
-                 plot_start_end_markers: bool = False,
-                 length_unit: Unit = Unit.meters) -> None:
+    trajectory.PosePath3D, typing.Sequence[trajectory.PosePath3D],
+    typing.Dict[str, trajectory.PosePath3D]], plot_mode=PlotMode.xy,
+        title: str = "", subplot_arg: int = 111,
+        plot_start_end_markers: bool = False,
+        length_unit: Unit = Unit.meters) -> None:
     """
     high-level function for plotting multiple trajectories
     :param fig: matplotlib figure
@@ -708,7 +715,8 @@ def error_array(ax: Axes, err_array: ListOrArray,
                 cumulative: bool = False, color='grey', name: str = "error",
                 title: str = "", xlabel: str = "index",
                 ylabel: typing.Optional[str] = None, subplot_arg: int = 111,
-                linestyle: str = "-", marker: typing.Optional[str] = None):
+                linestyle: str = "-", marker: typing.Optional[str] = None,
+                linewidth: float = None):
     """
     high-level function for plotting raw error values of a metric
     :param fig: matplotlib axes
@@ -728,17 +736,17 @@ def error_array(ax: Axes, err_array: ListOrArray,
     if cumulative:
         if x_array is not None:
             ax.plot(x_array, np.cumsum(err_array), linestyle=linestyle,
-                    marker=marker, color=color, label=name)
+                    marker=marker, color=color, label=name, linewidth=linewidth)
         else:
             ax.plot(np.cumsum(err_array), linestyle=linestyle, marker=marker,
-                    color=color, label=name)
+                    color=color, label=name, linewidth=linewidth)
     else:
         if x_array is not None:
             ax.plot(x_array, err_array, linestyle=linestyle, marker=marker,
-                    color=color, label=name)
+                    color=color, label=name, linewidth=linewidth)
         else:
             ax.plot(err_array, linestyle=linestyle, marker=marker, color=color,
-                    label=name)
+                    label=name, linewidth=linewidth)
     color_pallete = itertools.cycle(sns.color_palette())
     if statistics is not None:
         for stat_name, value in statistics.items():
@@ -753,10 +761,9 @@ def error_array(ax: Axes, err_array: ListOrArray,
     if threshold is not None:
         ax.axhline(y=threshold, color='red', linestyle='dashed', linewidth=2.0,
                    label="threshold")
-    plt.ylabel(ylabel if ylabel else name)
-    plt.xlabel(xlabel)
-    plt.title(title)
-    plt.legend(frameon=True)
+    ax.set_ylabel(ylabel if ylabel else name)
+    ax.set_xlabel(xlabel)
+    ax.set_title(title)
 
 
 def ros_map(

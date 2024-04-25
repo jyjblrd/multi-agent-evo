@@ -34,7 +34,7 @@ from scipy.spatial.transform import Rotation
 from rosbags.rosbag1 import (Reader as Rosbag1Reader, Writer as Rosbag1Writer)
 from rosbags.rosbag2 import (Reader as Rosbag2Reader, Writer as Rosbag2Writer)
 from rosbags.serde import deserialize_cdr, ros1_to_cdr, serialize_cdr
-from rosbags.serde.serdes import cdr_to_ros1
+from rosbags.serde import cdr_to_ros1
 
 from evo import EvoException
 import evo.core.lie_algebra as lie

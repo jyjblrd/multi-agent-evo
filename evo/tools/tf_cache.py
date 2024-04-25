@@ -29,7 +29,7 @@ import rospy
 import tf2_py
 from geometry_msgs.msg import TransformStamped
 from rosbags.rosbag1 import Reader as Rosbag1Reader
-from rosbags.serde.serdes import deserialize_cdr, ros1_to_cdr
+from rosbags.serde import deserialize_cdr, ros1_to_cdr
 from std_msgs.msg import Header
 
 from evo import EvoException
